@@ -7,12 +7,11 @@ for the standard workflow.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from glc.channels.base import ChannelAdapter
 from glc.channels.envelope import ChannelMessage, ChannelReply
-
-from datetime import datetime
 from glc.security.trust_level import classify
 
 
@@ -28,7 +27,7 @@ class Adapter(ChannelAdapter):
 
     async def on_message(self, raw: Any) -> ChannelMessage:
         """Convert incoming WebSocket frame to ChannelMessage."""
-        
+
         # Handle disconnect gracefully
         if self.mock and self.mock.pop_disconnect():
             return ChannelMessage(
@@ -41,37 +40,37 @@ class Adapter(ChannelAdapter):
                 attachments=[],
                 metadata={},
             )
-        
+
         # Step 1: Validate input is a dict
         if not isinstance(raw, dict):
             return None
-        
+
         # Step 2: Extract fields from WebSocket frame
         frame_type = raw.get("type")
         if frame_type != "user_message":
             # Only process user_message frames
             return None
-        
+
         session_id = raw.get("session_id")
         user_id = raw.get("user_id")
         user_handle = raw.get("user_handle", "unknown")
         text = raw.get("text")
         attachments = raw.get("attachments", [])
         client_ts = raw.get("client_ts")
-        
+
         # Step 3: Validate required fields
         if not user_id or not text:
             return None
-        
+
         # Step 4: Determine trust level
         trust_level = classify("webui", user_id)
-        
+
         # Step 5: Convert client timestamp (milliseconds) to datetime
         if client_ts:
             arrived_at = datetime.fromtimestamp(client_ts / 1000.0)
         else:
             arrived_at = datetime.now()
-        
+
         # Step 6: Create and return ChannelMessage
         msg = ChannelMessage(
             channel="webui",
@@ -83,26 +82,26 @@ class Adapter(ChannelAdapter):
             attachments=attachments,
             metadata={"session_id": session_id} if session_id else {},
         )
-        
+
         return msg
 
     async def send(self, reply: ChannelReply) -> Any:
         """Send agent reply back through WebSocket with typing indicator."""
-        
+
         # Step 1: Extract data from reply
         user_id = reply.channel_user_id
         text = reply.text
-        
+
         if not user_id or not text:
             return {"status": 400, "error": "Missing user_id or text"}
-        
+
         # Step 2: Send typing indicator frame (pre-frame)
         typing_frame = {
             "type": "agent_reply",
             "text": "",
             "typing": True,
         }
-        
+
         if self.mock:
             result1 = await self.mock.send(typing_frame)
             # Check for rate limit
@@ -111,14 +110,14 @@ class Adapter(ChannelAdapter):
         else:
             # In production, send via WebSocket
             pass
-        
+
         # Step 3: Send final reply frame
         final_frame = {
             "type": "agent_reply",
             "text": text,
             "typing": False,
         }
-        
+
         if self.mock:
             result2 = await self.mock.send(final_frame)
             # Check for rate limit
